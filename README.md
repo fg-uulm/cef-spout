@@ -1,3 +1,12 @@
+# CEF with Spout Output
+
+This application is heavily based on daktronics' CEF-Mixer application (see https://github.com/daktronics/cef-mixer). In its core, it is a Chromium-based web content rendering engine (a "headless" browser), rendering its output also as a texture to a Spout (https://github.com/leadedge/Spout2/) data channel for further use in other Spout-enabled applications. 
+
+This project was originally intended as a tool to work with HTML/JS/SVG-based visuals in other applications like MadMapper for creative coding and music/art installations (see other repos), but can be universally used to fetch live graphical output of a web browser for any purpose.
+
+See the original cef-mixer description below for build instructions and basic usage. PLEASE NOTE: It is recommended to use the CMAKE GUI together with the original cmake Files (and to set CEF_ROOT manually then), and not the provided .bat because of additional dependencies that might or might not work with the latter.
+
+
 # CEF Offscreen-Rendering (OSR) Mixer Demo
 
 A sample application to demonstrate how to use the proposed `OnAcceleratedPaint()` callback when using CEF for HTML off-screen rendering.  This application uses D3D11 shared textures for CEF which improves the OSR rendering performance.
