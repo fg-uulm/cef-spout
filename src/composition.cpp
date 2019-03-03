@@ -43,8 +43,13 @@ void Layer::mouse_move(bool, int32_t, int32_t)
 	// default is to do nothing with input
 }
 
+void Layer::refresh()
+{
+	//nothing
+}
+
 void Layer::move(float x, float y, float width, float height)
-{	
+{
 	bounds_.x = x;
 	bounds_.y = y;
 	bounds_.width = width;
@@ -64,14 +69,14 @@ void Layer::tick(double)
 // helper method for derived classes to draw a textured-quad.
 //
 void Layer::render_texture(
-		shared_ptr<d3d11::Context> const& ctx, 
-		shared_ptr<d3d11::Texture2D> const& texture)
+	shared_ptr<d3d11::Context> const& ctx,
+	shared_ptr<d3d11::Texture2D> const& texture)
 {
 	if (!geometry_) {
-		geometry_ = device_->create_quad(bounds_.x, 
+		geometry_ = device_->create_quad(bounds_.x,
 			bounds_.y, bounds_.width, bounds_.height, flip_);
 	}
-	
+
 	if (geometry_ && texture)
 	{
 		// we need a shader
@@ -120,7 +125,7 @@ double Composition::fps() const
 
 void Composition::add_layer(shared_ptr<Layer> const& layer)
 {
-	if (layer) 
+	if (layer)
 	{
 		lock_guard<mutex> guard(lock_);
 
@@ -218,6 +223,18 @@ void Composition::mouse_move(bool leave, int32_t x, int32_t y)
 	}
 }
 
+void Composition::refresh()
+{
+	// forward to layer - making x, y relative to layer
+	for (size_t i = 0; i < layers_.size(); i++)
+	{
+		auto const layer = layers_[i];
+		if (layer) {
+			layer->refresh();
+		}
+	}
+}
+
 shared_ptr<Layer> Composition::layer_from_point(int32_t& x, int32_t& y)
 {
 	auto const w = width();
@@ -248,7 +265,7 @@ shared_ptr<Layer> Composition::layer_from_point(int32_t& x, int32_t& y)
 			auto const sh = static_cast<int32_t>(bounds.height * h);
 			if (x >= sx && x < (sx + sw))
 			{
-				if (y >= sy && y < (sy + sh)) 
+				if (y >= sy && y < (sy + sh))
 				{
 					// convert points to relative
 					x = x - sx;
@@ -296,10 +313,10 @@ float to_float(CefRefPtr<CefDictionaryValue> const& dict, string const& key, flo
 // create a composition layer from the given dictionary
 //
 shared_ptr<Layer> to_layer(
-		shared_ptr<d3d11::Device> const& device, 
-		int width, 
-		int height,
-		CefRefPtr<CefDictionaryValue> const& dict)
+	shared_ptr<d3d11::Device> const& device,
+	int width,
+	int height,
+	CefRefPtr<CefDictionaryValue> const& dict)
 {
 	if (!dict || dict->GetType("type") != VTYPE_STRING) {
 		return nullptr;
@@ -320,7 +337,7 @@ shared_ptr<Layer> to_layer(
 			return create_image_layer(device, *realpath);
 		}
 	}
-	else if (type == "web") 
+	else if (type == "web")
 	{
 		auto const want_input = dict->GetBool("want_input");
 		auto const view_source = dict->GetBool("view_source");
@@ -360,17 +377,17 @@ shared_ptr<Composition> create_composition(
 				if (layers->GetType(n) == VTYPE_DICTIONARY)
 				{
 					auto const obj = layers->GetDictionary(n);
-					if (obj && obj->IsValid()) 
+					if (obj && obj->IsValid())
 					{
 						// create a valid layer from the JSON-object
-						auto const layer = to_layer(device, 
-									composition->width(), 
-									composition->height(), 
-									obj);
+						auto const layer = to_layer(device,
+							composition->width(),
+							composition->height(),
+							obj);
 						if (!layer) {
 							continue;
 						}
-						
+
 						// add the layer to the composition
 						composition->add_layer(layer);
 
@@ -383,9 +400,9 @@ shared_ptr<Composition> create_composition(
 						layer->move(x, y, w, h);
 					}
 				}
-			}		
-		}	
+			}
+		}
 	}
-	
+
 	return composition;
 }

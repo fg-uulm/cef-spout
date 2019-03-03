@@ -37,17 +37,17 @@ private:
 	int sync_interval_;
 	bool resize_;
 	std::string const json_;
-	
+
 public:
 
 	Window(
 		HINSTANCE instance,
-		std::shared_ptr<d3d11::Device> const& device, 
+		std::shared_ptr<d3d11::Device> const& device,
 		std::shared_ptr<Composition> const& comp,
 		std::string const& json)
 		: instance_(instance)
 		, device_(device)
-		, composition_(comp) 
+		, composition_(comp)
 		, sync_interval_(1)
 		, resize_(false)
 		, json_(json)
@@ -93,16 +93,16 @@ public:
 			wcex.hIconSm = nullptr;
 			if (!RegisterClassExW(&wcex)) {
 				return nullptr;
-			}		
+			}
 		}
-		
+
 		auto const self = new Window(instance, device, comp, json);
 
 		std::string title("CEF OSR Mixer - ");
 		title.append(cef_version());
 		title.append(" - [gpu: ");
 		title.append(device->adapter_name());
-		title.append("]");		
+		title.append("]");
 
 		auto const hwnd = CreateWindow(class_name,
 			to_utf16(title).c_str(),
@@ -152,7 +152,7 @@ public:
 		if (!ctx || !swapchain_) {
 			return;
 		}
-		
+
 		swapchain_->bind(ctx);
 
 		// is there a request to resize ... if so, resize
@@ -211,7 +211,7 @@ private:
 			{
 				SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)(0));
 				delete self;
-			}		
+			}
 		}
 
 		lr = DefWindowProc(hwnd, message, wp, lp);
@@ -222,61 +222,68 @@ private:
 	{
 		switch (message)
 		{
-			case WM_CREATE:
-				on_create();
-				break;
+		case WM_CREATE:
+			on_create();
+			break;
 
-			case WM_PAINT:
+		case WM_PAINT:
+		{
+			PAINTSTRUCT ps;
+			BeginPaint(hwnd(), &ps);
+			EndPaint(hwnd(), &ps);
+		}
+		break;
+
+		case WM_COMMAND:
+			switch (LOWORD(wp))
 			{
-				PAINTSTRUCT ps;
-				BeginPaint(hwnd(), &ps);
-				EndPaint(hwnd(), &ps);
+			case ID_WINDOW_NEW:
+				on_new_window();
+				log_message("WINDOW");
+				break;
+			case ID_WINDOW_VSYNC:
+				sync_interval_ = sync_interval_ ? 0 : 1;
+				resize_ = true;
+				break;
+			case ID_VIEW_DEVTOOLS:
+				//show_devtools_ = true;
+				break;
+			default: break;
 			}
 			break;
 
-			case WM_COMMAND:
-				switch (LOWORD(wp))
-				{
-					case ID_WINDOW_NEW:
-						on_new_window();
-						break;
-					case ID_WINDOW_VSYNC:
-						sync_interval_ = sync_interval_ ? 0 : 1;
-						resize_ = true;
-						break;
-					case ID_VIEW_DEVTOOLS:
-						//show_devtools_ = true;
-						break;
-					default: break;
+		case WM_KEYDOWN:
+			if (wp == VK_F5) {
+				if (composition_) {
+					composition_->refresh();
 				}
-				break;
+			}
+		case WM_LBUTTONDOWN:
+			on_mouse_click(MouseButton::Left, false, lp);
+			break;
+		case WM_LBUTTONUP:
+			on_mouse_click(MouseButton::Left, true, lp);
+			break;
+		case WM_RBUTTONDOWN:
+			on_mouse_click(MouseButton::Right, false, lp);
+			break;
+		case WM_RBUTTONUP:
+			on_mouse_click(MouseButton::Right, true, lp);
+			break;
 
-			case WM_LBUTTONDOWN: 
-				on_mouse_click(MouseButton::Left, false, lp);
-				break;
-			case WM_LBUTTONUP: 
-				on_mouse_click(MouseButton::Left, true, lp);
-				break;
-			case WM_RBUTTONDOWN: 
-				on_mouse_click(MouseButton::Right, false, lp);
-				break;
-			case WM_RBUTTONUP: 
-				on_mouse_click(MouseButton::Right, true, lp);
-				break;
+		case WM_MOUSEMOVE: on_mouse_move(false, lp);
+			break;
 
-			case WM_MOUSEMOVE: on_mouse_move(false, lp);
-				break;
+		case WM_SIZE:
+			// signal that we want a resize of output
+			resize_ = true;
+			break;
 
-			case WM_SIZE:
-				// signal that we want a resize of output
-				resize_ = true;
-				break;
+		case WM_DESTROY:
+			PostQuitMessage(0);
+			break;
 
-			case WM_DESTROY:
-				PostQuitMessage(0);
-				break;
-
-			default: break;
+		default: break;
 		}
 
 		return 0;
@@ -361,7 +368,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 			auto option = to_utf8(arg_list[n]);
 			if (option.substr(0, 2) != "--")
 			{
-				url = option;			
+				url = option;
 			}
 			else
 			{
@@ -412,11 +419,11 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 	}
 	if (height <= 0) {
 		height = 720;
-	}	
+	}
 
 	// this demo uses WIC to load images .. so we need COM
 	ComInitializer com_init;
-	
+
 	std::string json;
 
 	// if the url given on the command line is actually a local file ... 
@@ -429,7 +436,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 			json.assign((std::istreambuf_iterator<char>(fin)), std::istreambuf_iterator<char>());
 		}
 	}
-	
+
 	// if no JSON yet, then use command-line params to
 	// generate a default JSON layer description
 	if (json.empty())
@@ -468,28 +475,28 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 					builder << "      \"width\":" << cx << "," << std::endl;
 					builder << "      \"height\":" << cy << "," << std::endl;
 					builder << "      \"want_input\":true," << std::endl;
-					builder << "      \"view_source\":" << (view_source ? "true" : "false");					
+					builder << "      \"view_source\":" << (view_source ? "true" : "false");
 					builder << "    }," << std::endl;
 				}
 			}
 		}
 
 		// add an image overlay layer
-		builder << "    { \"type\":\"image\", \"src\":\"resource/overlay.png\" }," << std::endl;
+		//builder << "    { \"type\":\"image\", \"src\":\"resource/overlay.png\" }," << std::endl;
 
 		// add a HUD layer to show stats
 		auto const hud_file = locate_media("resource/hud.html");
 		if (hud_file) {
 			// (we need to convert to file:/// url for CEF
 			auto const hud_url = to_file_url(*hud_file);
-			if (!hud_url.empty()) 
+			if (!hud_url.empty())
 			{
 				builder << "    { \"type\":\"web\"," << std::endl
-					     << "      \"src\":\"" << hud_url << "\"," << std::endl
-					     << "      \"top\":0.95," << std::endl
-					     << "      \"height\":0.05," << std::endl
-						  << "      \"view_source\":" << (view_source ? "true" : "false")
-					     << "    }" << std::endl;
+					<< "      \"src\":\"" << hud_url << "\"," << std::endl
+					<< "      \"top\":0.95," << std::endl
+					<< "      \"height\":0.05," << std::endl
+					<< "      \"view_source\":" << (view_source ? "true" : "false")
+					<< "    }" << std::endl;
 			}
 		}
 
@@ -500,15 +507,15 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 	// create the first top-level window 
 	// (additional can be opened with Ctrl+W)
 	auto const window = Window::open(instance, json, width, height);
-	if (!window) 
+	if (!window)
 	{
 		assert(0);
 		cef_uninitialize();
 		return 0;
 	}
-	
+
 	// load keyboard accelerators
-	HACCEL accel_table = 
+	HACCEL accel_table =
 		LoadAccelerators(instance, MAKEINTRESOURCE(IDR_APPLICATION));
 
 	auto const start_time = time_now();
@@ -528,7 +535,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 		else
 		{
 			auto const t = (time_now() - start_time) / 1000000.0;
-			for (auto const& w : windows_) 
+			for (auto const& w : windows_)
 			{
 				w->tick(t);
 				w->render();

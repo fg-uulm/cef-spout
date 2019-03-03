@@ -117,7 +117,7 @@ set(CMAKE_CONFIGURATION_TYPES Debug Release)
 
 # Project name.
 # TODO: Change this line to match your project name when you copy this file.
-project(cefmixer)
+project(cef_spout)
 
 # Use folders in the resulting project files.
 set_property(GLOBAL PROPERTY OS_FOLDERS ON)
@@ -205,6 +205,11 @@ set(
     TARGET_OUTPUT_DIRECTORY
     ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIGURATION>
     )
+
+
+# Spout-related configuration
+file(GLOB spout_src_files "lib/Spout2/SpoutSDK/Source/*.cpp")
+file(GLOB spout_inc_files "lib/Spout2/SpoutSDK/Source/*.h")
 
 #
 # Define CEF-based targets.

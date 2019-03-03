@@ -4,6 +4,8 @@
 #include <include/cef_browser.h>
 #include <include/cef_client.h>
 #include <include/cef_version.h>
+#include "../lib/Spout2/SpoutSDK/Source/Spout.h"
+#include "../lib/Spout2/SpoutSDK/Source/SpoutSenderNames.h"
 
 #include <mutex>
 #include <condition_variable>
@@ -18,6 +20,8 @@
 #include <algorithm>
 
 #include "util.h"
+#include <chrono>
+
 
 using namespace std;
 
@@ -28,7 +32,7 @@ using namespace std;
 CefRefPtr<CefV8Value> to_v8object(CefRefPtr<CefDictionaryValue> const& dictionary)
 {
 	auto const obj = CefV8Value::CreateObject(nullptr, nullptr);
-	if (dictionary) 
+	if (dictionary)
 	{
 		auto const attrib = V8_PROPERTY_ATTRIBUTE_READONLY;
 		CefDictionaryValue::KeyList keys;
@@ -38,20 +42,20 @@ CefRefPtr<CefV8Value> to_v8object(CefRefPtr<CefDictionaryValue> const& dictionar
 			auto const type = dictionary->GetType(k);
 			switch (type)
 			{
-				case VTYPE_BOOL: obj->SetValue(k,
-					CefV8Value::CreateBool(dictionary->GetBool(k)), attrib);
-					break;
-				case VTYPE_INT: obj->SetValue(k,
-					CefV8Value::CreateInt(dictionary->GetInt(k)), attrib);
-					break;
-				case VTYPE_DOUBLE: obj->SetValue(k, 
-					CefV8Value::CreateDouble(dictionary->GetDouble(k)), attrib);
-					break;
-				case VTYPE_STRING: obj->SetValue(k,
-					CefV8Value::CreateString(dictionary->GetString(k)), attrib);
-					break;
+			case VTYPE_BOOL: obj->SetValue(k,
+				CefV8Value::CreateBool(dictionary->GetBool(k)), attrib);
+				break;
+			case VTYPE_INT: obj->SetValue(k,
+				CefV8Value::CreateInt(dictionary->GetInt(k)), attrib);
+				break;
+			case VTYPE_DOUBLE: obj->SetValue(k,
+				CefV8Value::CreateDouble(dictionary->GetDouble(k)), attrib);
+				break;
+			case VTYPE_STRING: obj->SetValue(k,
+				CefV8Value::CreateString(dictionary->GetString(k)), attrib);
+				break;
 
-				default: break;
+			default: break;
 			}
 		}
 	}
@@ -62,6 +66,18 @@ class WebView;
 class FrameBuffer;
 
 extern bool show_devtools_;
+spoutSenderNames * sender;
+spoutGLDXinterop * interop;
+spoutDirectX * sdx;
+const char* globName = "CEF";
+int fbCount = 0;
+
+DXGI_FORMAT texFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+vector<ID3D11Texture2D *> activeTextures;
+vector<HANDLE> activeHandles;
+vector<string> activeNames;
+int numActiveSenders;
 
 class DevToolsClient : public CefClient
 {
@@ -91,8 +107,8 @@ shared_ptr<Layer> create_popup_layer(
 // V8 handler for our 'mixer' object available to javascript
 // running in a page within this application
 //
-class MixerHandler : 
-			public CefV8Accessor
+class MixerHandler :
+	public CefV8Accessor
 {
 public:
 	MixerHandler(
@@ -162,12 +178,14 @@ private:
 };
 
 
-class WebApp : public CefApp, 
-					public CefBrowserProcessHandler,
-	            public CefRenderProcessHandler
+class WebApp : public CefApp,
+	public CefBrowserProcessHandler,
+	public CefRenderProcessHandler
 {
 public:
 	WebApp() {
+		sender = new spoutSenderNames;
+		sender->SetMaxSenders(10);
 	}
 
 	CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
@@ -184,9 +202,9 @@ public:
 	{
 		// disable creation of a GPUCache/ folder on disk
 		command_line->AppendSwitch("disable-gpu-shader-disk-cache");
-		
+
 		//command_line->AppendSwitch("disable-accelerated-video-decode");
-				
+
 		// un-comment to show the built-in Chromium fps meter
 		//command_line->AppendSwitch("show-fps-counter");		
 
@@ -242,7 +260,7 @@ public:
 	//
 	bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,
 		CefProcessId /*source_process*/,
-		CefRefPtr<CefProcessMessage> message) 
+		CefRefPtr<CefProcessMessage> message)
 	{
 		auto const name = message->GetName().ToString();
 		if (name == "mixer-update-stats")
@@ -275,12 +293,15 @@ private:
 class FrameBuffer
 {
 public:
-	FrameBuffer(shared_ptr<d3d11::Device> const& device)
-		: device_(device)
-		, dirty_(false)
+	FrameBuffer(shared_ptr<d3d11::Device> const& device) : device_(device), dirty_(false)
 	{
+		spoutID.append(to_string(fbCount));
+		fbCount++;
+		sender->CreateSender(spoutID.c_str(), 1280, 720, NULL, texFormat);
 	}
-	
+
+	string spoutID = "CEF_";
+
 	int32_t width() {
 		if (shared_buffer_) {
 			return shared_buffer_->width();
@@ -306,14 +327,14 @@ public:
 		{
 			shared_buffer_ = device_->create_texture(
 				width, height, DXGI_FORMAT_B8G8R8A8_UNORM, nullptr, 0);
-			
+
 			sw_buffer_ = shared_ptr<uint8_t>((uint8_t*)malloc(cb), free);
 		}
 
-		if (sw_buffer_ && buffer) 
+		if (sw_buffer_ && buffer)
 		{
 			// todo: support dirty rect(s)
-			memcpy(sw_buffer_.get(), buffer, cb);		
+			memcpy(sw_buffer_.get(), buffer, cb);
 		}
 
 		dirty_ = true;
@@ -337,15 +358,17 @@ public:
 		}
 
 		// open the shared texture
-		if (!shared_buffer_) 
+		if (!shared_buffer_)
 		{
-			shared_buffer_ = device_->open_shared_texture((void*)shared_handle);				
+			shared_buffer_ = device_->open_shared_texture((void*)shared_handle);
 			if (!shared_buffer_) {
 				log_message("could not open shared texture!");
 			}
 		}
 
 		dirty_ = true;
+		//log_message("html: OnAcceleratedPaint (%dx%d)", width(), height());
+		sender->UpdateSender(spoutID.c_str(), width(), height(), (void*)shared_handle, texFormat);
 	}
 
 	//
@@ -362,10 +385,10 @@ public:
 		// using software buffer? just copy to texture
 		if (sw_buffer_ && shared_buffer_ && dirty_)
 		{
-			d3d11::ScopedBinder<d3d11::Texture2D> binder(ctx, shared_buffer_);			
+			d3d11::ScopedBinder<d3d11::Texture2D> binder(ctx, shared_buffer_);
 			shared_buffer_->copy_from(
-				sw_buffer_.get(), 
-				shared_buffer_->width() * 4, 
+				sw_buffer_.get(),
+				shared_buffer_->width() * 4,
 				shared_buffer_->height());
 		}
 
@@ -416,12 +439,12 @@ class WebView : public CefClient,
 {
 public:
 	WebView(
-			string const& name,
-			shared_ptr<d3d11::Device> const& device,
-			int width, 
-			int height, 
-			bool use_shared_textures,
-			bool send_begin_Frame)
+		string const& name,
+		shared_ptr<d3d11::Device> const& device,
+		int width,
+		int height,
+		bool use_shared_textures,
+		bool send_begin_Frame)
 		: name_(name)
 		, width_(width)
 		, height_(height)
@@ -434,6 +457,7 @@ public:
 	{
 		frame_ = 0;
 		fps_start_ = 0ull;
+		//globName = name.c_str();
 	}
 
 	~WebView() {
@@ -466,16 +490,22 @@ public:
 		if (browser.get()) {
 			browser->GetHost()->CloseBrowser(true);
 		}
+		for (size_t i = 0; i < fbCount; i++)
+		{
+			string id = "CEF_";
+			id.append(to_string(i));
+			sender->ReleaseSenderName(id.c_str());
+		}
 
 		log_message("html view is closed\n");
 	}
 
-	CefRefPtr<CefRenderHandler> GetRenderHandler() override { 
-		return this; 
+	CefRefPtr<CefRenderHandler> GetRenderHandler() override {
+		return this;
 	}
 
-	CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { 
-		return this; 
+	CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override {
+		return this;
 	}
 
 	CefRefPtr<CefLoadHandler> GetLoadHandler() override {
@@ -558,11 +588,11 @@ public:
 			if (!fps_start_) {
 				fps_start_ = now;
 			}
-			
+
 			if (view_buffer_) {
 				view_buffer_->on_gpu_paint((void*)share_handle);
 			}
-			
+
 			if ((now - fps_start_) > 1000000)
 			{
 				auto const fps = frame_ / double((now - fps_start_) / 1000000.0);
@@ -576,7 +606,7 @@ public:
 				fps_start_ = time_now();
 			}
 		}
-		else 
+		else
 		{
 			// just update the popup frame ... we are only tracking 
 			// metrics for the view
@@ -608,24 +638,24 @@ public:
 		}
 	}
 
-	void OnPopupShow(CefRefPtr<CefBrowser> browser, bool show) override 
-	{		
+	void OnPopupShow(CefRefPtr<CefBrowser> browser, bool show) override
+	{
 		log_message("%s popup\n", show ? "show" : "hide");
-		
+
 		lock_guard<mutex> guard(lock_);
 		auto const composition = composition_.lock();
-		if (composition) 
+		if (composition)
 		{
-			if (show) 
+			if (show)
 			{
 				// remove existing
 				composition->remove_layer(popup_layer_);
-				
+
 				// create new layer
 				popup_layer_ = create_popup_layer(device_, popup_buffer_);
 				composition->add_layer(popup_layer_);
 			}
-			else{
+			else {
 				composition->remove_layer(popup_layer_);
 			}
 		}
@@ -642,7 +672,7 @@ public:
 			layer = popup_layer_;
 		}
 
-		if (layer) 
+		if (layer)
 		{
 			auto const composition = layer->composition();
 			if (composition)
@@ -671,7 +701,7 @@ public:
 		CefWindowInfo& window_info,
 		CefRefPtr<CefClient>& client,
 		CefBrowserSettings& settings,
-		bool* no_javascript_access) override 
+		bool* no_javascript_access) override
 	{
 		shared_ptr<Composition> composition;
 		{
@@ -693,13 +723,13 @@ public:
 		auto const height = popup_features.heightSet ? popup_features.height : 300;
 
 		CefRefPtr<WebView> view(new WebView(
-			target_frame_name, 
-			device_, 
-			width, 
-			height, 
+			target_frame_name,
+			device_,
+			width,
+			height,
 			use_shared_textures(),
 			send_begin_frame_));
-		
+
 		CefBrowserHost::CreateBrowser(
 			window_info,
 			view,
@@ -723,14 +753,14 @@ public:
 			// convert popup dimensions to normalized units
 			// for composition space
 			auto const sx = width / float(outer_width);
-			auto const sy = height / float(outer_height);			
+			auto const sy = height / float(outer_height);
 			layer->move(0.5f - (sx / 2), 0.5f - (sy / 2), sx, sy);
 		}
 
 		return false;
 	}
 
-	void OnLoadEnd(CefRefPtr<CefBrowser> browser, 
+	void OnLoadEnd(CefRefPtr<CefBrowser> browser,
 		CefRefPtr<CefFrame> frame,
 		int /*httpStatusCode*/)
 	{
@@ -761,13 +791,13 @@ public:
 		}
 
 		// optionally issue a BeginFrame request
-		if (send_begin_frame_ && browser) {		
+		if (send_begin_frame_ && browser) {
 			browser->GetHost()->SendExternalBeginFrame();
 		}
 	}
 
-	void update_stats(CefRefPtr<CefBrowser> const& browser, 
-			shared_ptr<Composition> const& composition)
+	void update_stats(CefRefPtr<CefBrowser> const& browser,
+		shared_ptr<Composition> const& composition)
 	{
 		if (!browser || !composition) {
 			return;
@@ -775,7 +805,7 @@ public:
 
 		auto message = CefProcessMessage::Create("mixer-update-stats");
 		auto args = message->GetArgumentList();
-		
+
 		// create a dictionary to hold all of individual statistic values
 		// it will get converted by the Render process into a V8 Object
 		// that gets passed to the script running in the page
@@ -798,7 +828,7 @@ public:
 		{
 			width_ = width;
 			height_ = height;
-			
+
 			auto const browser = safe_browser();
 			if (browser)
 			{
@@ -844,20 +874,20 @@ public:
 	void mouse_click(MouseButton button, bool up, int32_t x, int32_t y)
 	{
 		auto const browser = safe_browser();
-		if (browser) 
+		if (browser)
 		{
 			CefMouseEvent mouse;
 			mouse.x = x;
 			mouse.y = y;
 			mouse.modifiers = 0;
-			
+
 			cef_mouse_button_type_t ctype;
 			switch (button)
 			{
-				case MouseButton::Middle: ctype = MBT_MIDDLE; break;
-				case MouseButton::Right: ctype = MBT_RIGHT; break;
-				case MouseButton::Left: ctype = MBT_LEFT;
-				default:break;			
+			case MouseButton::Middle: ctype = MBT_MIDDLE; break;
+			case MouseButton::Right: ctype = MBT_RIGHT; break;
+			case MouseButton::Left: ctype = MBT_LEFT;
+			default:break;
 			}
 			browser->GetHost()->SendMouseClickEvent(mouse, ctype, up, 1);
 		}
@@ -876,11 +906,19 @@ public:
 		}
 	}
 
+	void refresh() {
+		auto const browser = safe_browser();
+		if (browser)
+		{
+			browser->Reload();
+		}
+	}
+
 private:
 	IMPLEMENT_REFCOUNTING(WebView);
 
-	CefRefPtr<CefBrowser> safe_browser() 
-	{		
+	CefRefPtr<CefBrowser> safe_browser()
+	{
 		lock_guard<mutex> guard(lock_);
 		return browser_;
 	}
@@ -897,7 +935,7 @@ private:
 	bool needs_stats_update_;
 	bool use_shared_textures_;
 	bool send_begin_frame_;
-	
+
 	shared_ptr<Layer> popup_layer_;
 	weak_ptr<Composition> composition_;
 	shared_ptr<d3d11::Device> const device_;
@@ -971,7 +1009,7 @@ public:
 	void render(shared_ptr<d3d11::Context> const& ctx) override
 	{
 		// simply use the base class method to draw our texture
-		if (view_)  {
+		if (view_) {
 			render_texture(ctx, view_->texture(ctx));
 		}
 	}
@@ -989,7 +1027,16 @@ public:
 			view_->mouse_move(leave, x, y);
 		}
 	}
-	
+
+	void refresh() override
+	{
+		if (view_) {
+			view_->refresh();
+		}
+	}
+
+
+
 private:
 
 	CefRefPtr<WebView> const view_;
@@ -1123,7 +1170,7 @@ void CefModule::message_loop()
 	// signal cef is initialized and ready
 	ready_ = true;
 	signal_.notify_one();
-	
+
 	CefRunMessageLoop();
 
 	log_message("cef shutting down ... \n");
@@ -1152,8 +1199,8 @@ shared_ptr<Layer> create_web_layer(
 shared_ptr<Layer> create_web_layer(
 	std::shared_ptr<d3d11::Device> const& device,
 	string const& url,
-	int width, 
-	int height, 
+	int width,
+	int height,
 	bool want_input,
 	bool view_source)
 {
@@ -1162,7 +1209,7 @@ shared_ptr<Layer> create_web_layer(
 
 	// we want to use OnAcceleratedPaint
 	window_info.shared_texture_enabled = true;
-	
+
 	// we are going to issue calls to SendExternalBeginFrame
 	// and CEF will not use its internal BeginFrameTimer in this case
 	window_info.external_begin_frame_enabled = true;
@@ -1197,16 +1244,16 @@ shared_ptr<Layer> create_web_layer(
 	}
 
 	CefRefPtr<WebView> view(new WebView(
-			name, device, width, height, 
-			window_info.shared_texture_enabled, 
-			window_info.external_begin_frame_enabled));
+		name, device, width, height,
+		window_info.shared_texture_enabled,
+		window_info.external_begin_frame_enabled));
 
 	CefBrowserHost::CreateBrowser(
-			window_info,
-			view, 
-			url, 
-			settings, 
-			nullptr);
+		window_info,
+		view,
+		url,
+		settings,
+		nullptr);
 
 	return create_web_layer(device, want_input, view);
 }
@@ -1258,7 +1305,7 @@ void cef_uninitialize()
 string cef_version()
 {
 	ostringstream ver;
-	ver << "CEF: " << 
+	ver << "CEF: " <<
 		CEF_VERSION << " (Chromium: "
 		<< CHROME_VERSION_MAJOR << "."
 		<< CHROME_VERSION_MINOR << "."

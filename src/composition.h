@@ -36,16 +36,17 @@ public:
 
 	virtual void attach(std::shared_ptr<Composition> const&);
 
-	virtual void move(float x, float y, float width, float height);	
-	
+	virtual void move(float x, float y, float width, float height);
+
 	virtual void tick(double);
 	virtual void render(std::shared_ptr<d3d11::Context> const&) = 0;
-	
+
 	virtual void mouse_click(MouseButton button, bool up, int32_t x, int32_t y);
 	virtual void mouse_move(bool leave, int32_t x, int32_t y);
+	virtual void refresh();
 
 	Rect bounds() const;
-	
+
 	std::shared_ptr<Composition> composition() const;
 
 	bool want_input() const;
@@ -53,8 +54,8 @@ public:
 protected:
 
 	void render_texture(
-			std::shared_ptr<d3d11::Context> const& ctx, 
-			std::shared_ptr<d3d11::Texture2D> const& texture);
+		std::shared_ptr<d3d11::Context> const& ctx,
+		std::shared_ptr<d3d11::Texture2D> const& texture);
 
 	bool flip_;
 	Rect bounds_;
@@ -64,7 +65,7 @@ protected:
 	std::shared_ptr<d3d11::Effect> effect_;
 	std::shared_ptr<d3d11::Device> const device_;
 
-private:	
+private:
 	std::weak_ptr<Composition> composition_;
 };
 
@@ -75,8 +76,8 @@ private:
 class Composition : public std::enable_shared_from_this<Composition>
 {
 public:
-	Composition(std::shared_ptr<d3d11::Device> const& device, 
-			int width, int height);
+	Composition(std::shared_ptr<d3d11::Device> const& device,
+		int width, int height);
 
 	int width() const { return width_; }
 	int height() const { return height_; }
@@ -88,7 +89,7 @@ public:
 
 	void tick(double);
 	void render(std::shared_ptr<d3d11::Context> const&);
-	
+
 	void add_layer(std::shared_ptr<Layer> const& layer);
 	bool remove_layer(std::shared_ptr<Layer> const& layer);
 
@@ -96,6 +97,7 @@ public:
 
 	void mouse_click(MouseButton button, bool up, int32_t x, int32_t y);
 	void mouse_move(bool leave, int32_t x, int32_t y);
+	void refresh();
 
 private:
 
@@ -124,14 +126,14 @@ std::shared_ptr<Composition> create_composition(
 
 // create a layer to show a image
 std::shared_ptr<Layer> create_image_layer(
-			std::shared_ptr<d3d11::Device> const& device,
-			std::string const& file_name);
+	std::shared_ptr<d3d11::Device> const& device,
+	std::string const& file_name);
 
 // create a layer to show a web page (using CEF)
 std::shared_ptr<Layer> create_web_layer(
-			std::shared_ptr<d3d11::Device> const& device,
-			std::string const& url,
-			int width,
-			int height,
-			bool want_input,
-			bool view_source);
+	std::shared_ptr<d3d11::Device> const& device,
+	std::string const& url,
+	int width,
+	int height,
+	bool want_input,
+	bool view_source);
